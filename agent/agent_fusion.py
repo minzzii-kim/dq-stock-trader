@@ -6,6 +6,7 @@ from os import path
 import numpy as np
 import random
 from collections import deque
+from functions import *
 
 
 class QNetwork(torch.nn.Module):
@@ -34,14 +35,14 @@ class QNetwork(torch.nn.Module):
 
         # fusion
         self.dropout = torch.nn.Dropout(0.5)
-        self.fc1 = torch.nn.Linear(in_features=12086, out_features=256)
-        self.fc2 = torch.nn.Linear(in_features=256, out_features=128)
-        self.fc3 = torch.nn.Linear(in_features=128, out_features=32)
-        self.out = torch.nn.Linear(in_features=32, out_features=action_size)
-        self.out_act = torch.nn.Softmax()
+        self.fc1 = torch.nn.Linear(in_features=12086, out_features=256).to(DEVICE)
+        self.fc2 = torch.nn.Linear(in_features=256, out_features=128).to(DEVICE)
+        self.fc3 = torch.nn.Linear(in_features=128, out_features=32).to(DEVICE)
+        self.out = torch.nn.Linear(in_features=32, out_features=action_size).to(DEVICE)
+        self.out_act = torch.nn.Softmax().to(DEVICE)
 
     def cnn_feature(self):
-        return torch.nn.Sequential(
+        cnn =  torch.nn.Sequential(
             torch.nn.Conv2d(in_channels=3, out_channels=8, kernel_size=(7, 7), padding="same"),
             torch.nn.BatchNorm2d(8),
             torch.nn.MaxPool2d(kernel_size=3, stride=2),
@@ -52,15 +53,19 @@ class QNetwork(torch.nn.Module):
             torch.nn.MaxPool2d(kernel_size=3, stride=2, padding=1),
             torch.nn.LeakyReLU(),
         )
+        cnn = cnn.to(DEVICE)
+        return cnn
 
     def lstm_feature(self):
-        return torch.nn.LSTM(
+        lstm = torch.nn.LSTM(
             input_size=6,  # 칼럼이 6개, ohlcv, adjclose, ma15
             hidden_size=self.lp['hidden_size'],
             num_layers=self.lp['num_layers'],
             dropout=self.lp['dropout'],
             batch_first=True
         )
+        lstm = lstm.to(DEVICE)
+        return lstm
 
     def forward(self, x1, x2):
         # x1: 시계열 정형데이터, x2: 이미지 데이터
@@ -81,11 +86,12 @@ class QNetwork(torch.nn.Module):
 
 
 class Agent:
-    def __init__(self, state_size, is_eval=False, model_name=""):
+    def __init__(self, state_size, is_eval=False, stock_name="", model_name=""):
         self.state_size = state_size  # normalized previous days
         self.action_size = 3  # sit, buy, sell
         self.memory = deque(maxlen=10000)
         self.inventory = []
+        self.stock_name = stock_name
         self.model_name = model_name
         self.is_eval = is_eval
 
@@ -98,8 +104,11 @@ class Agent:
         self.target_network = QNetwork(self.state_size, self.action_size)
         self.online_network = QNetwork(self.state_size, self.action_size)
 
-        if is_eval:
+        if model_name != 0:
             self.load()
+
+        if is_eval:
+            assert model_name != "", "model_name should be given in eval mode"
             self.online_network.eval()
 
         self.optimizer = torch.optim.Adam(self.online_network.parameters(), lr=0.0005)
@@ -108,10 +117,17 @@ class Agent:
         folder = f"models/{stock_name}"
         if not os.path.exists(folder):
             os.makedirs(folder, exist_ok=True)
-        torch.save(self.target_network.state_dict(), f"models/{stock_name}/{stock_name}_model_ep" + str(e) + ".pt")
+        torch.save(
+            self.target_network.state_dict(),
+            f"{DataPath}/models/{stock_name}/{stock_name}_model_ep" + str(e) + ".pt"
+        )
 
     def load(self):
-        self.online_network.load_state_dict(torch.load("models/" + self.model_name + ".pt"))
+        state_dict = torch.load(
+            f"{DataPath}/models/{self.stock_name}/{self.stock_name}_model_ep" + str(self.model_name) + ".pt"
+        )
+        self.target_network.load_state_dict(state_dict)
+        self.online_network.load_state_dict(state_dict)
 
     def act(self, num_state, img_state):
         if not self.is_eval and np.random.rand() <= self.epsilon:
@@ -129,10 +145,10 @@ class Agent:
     def expReplay(self, batch_size):
         loss = 0
         for state, action, reward, state_next, done in random.choices(self.memory, k=batch_size):
-            num_state = torch.tensor(state[0], dtype=torch.float)
+            num_state = state[0]
             img_state = state[1]
             action = torch.tensor(action, dtype=torch.long)
-            nxt_num_state = torch.tensor(state_next[0], dtype=torch.float)
+            nxt_num_state = state_next[0]
             nxt_img_state = state_next[1]
             reward = torch.tensor(reward, dtype=torch.float)
             done = torch.tensor(done, dtype=torch.float)
