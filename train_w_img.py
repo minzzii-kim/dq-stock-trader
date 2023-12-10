@@ -61,11 +61,14 @@ def run(stock_code, win, ep, datamode, batch_size, ep_from=0):
 				print("--------------------------------")
 				break
 
-			if len(agent.memory) % (batch_size // 2) == 0:
+			if (len(agent.memory) >= batch_size)&(t % 20000 == 0):
+				print(len(agent.memory), t,batch_size)
 				agent.expReplay(batch_size)
-				# agent.memory.clear() # hmm...
-		if (e + 1) % agent.target_update_period == 0:
-			agent.update_target()
+
+				#[mz] online network update 이후 target update 해야하므로..
+				# online network는 20000 마다 update, target network는 20000*39마다 update
+				if (t + 1) % agent.target_update_period == 0:
+					agent.update_target()
 
 		if (e + 1) % 5 == 0:
 			agent.save(e, stock_code)
